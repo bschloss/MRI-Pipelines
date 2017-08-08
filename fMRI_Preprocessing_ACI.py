@@ -7,7 +7,7 @@ from nipype.pipeline.engine import Workflow, Node, MapNode
 from math import pi as pi
 import argparse as ap
 
-#Define the directories where are data is located
+#Define the directories where data is located
 parser = ap.ArgumentParser(description='Preprocess DTI data and put in new folder')
 parser.add_argument('pardir', metavar="stanford", type=str,
                     help="Path to participant's directory")                                                  
