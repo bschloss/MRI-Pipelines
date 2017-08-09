@@ -1,4 +1,3 @@
-import os
 import nipype.interfaces.io as nio
 import nipype.interfaces.fsl as fsl
 from nipype.interfaces.utility import Function
@@ -8,40 +7,91 @@ from math import pi as pi
 import argparse as ap
 
 #Define the directories where data is located
-parser = ap.ArgumentParser(description='Preprocess DTI data and put in new folder')
-parser.add_argument('pardir', metavar="stanford", type=str,
-                    help="Path to participant's directory")                                                  
+parser = ap.ArgumentParser(description='Preprocess all runs simultaneously for one participant.\nTo be used in conjunction with PBS script, using a -t array for all participants.')
+parser.add_argument('-numruns', type=int,
+                    help='The number of functional runs (an integer)')  
+parser.add_argument('-func', type=str,
+                    help="A file containing all of the functional data to be analyzed, with one file path perline") 
+parser.add_argument('-str', type=str,
+                    help="The path to the structural T1 image") 
+parser.add_argument('-mni', type=str,
+                    help="The path to the MNI T1 image") 
+parser.add_argument('-mni_brain', type=str,
+                    help="The path to the brain extracted MNI T1 image")
+parser.add_argument('-mni_mask', type=str,
+                    help="The path to the mask used to brain extract the MNI T1 image")  
+parser.add_argument('-fieldmap_type', action='store_true',
+                    help='Takes one of three inputs "gre","se","none":\nthe "gre" option requires a magnitude and phase encoding image \nthe "se" option uses topup and and requires reverse phase encoded images')
+parser.add_argument('-hp_cutoff', type=float,
+                    help='Highpass filter cuttoff in seconds')
+parser.add_argument('-tr', type=float,
+                    help='Repetition time in seconds')
+parser.add_argument('-fwhm', type=float,
+                    help='Smoothing extent in millimeters for spatial smoothing')
+parser.add_argument('-outdir', type=str,
+                    help='The output directory')
+parser.add_argument('-mag', type=str,
+                    help="The magnitude image for a gre fieldmap")  
+parser.add_argument('-phase',type=str,
+                    help='The phase encoding image for a gre fieldmap')
+parser.add_argument('-se1', type=str,
+                    help='One of the se images for the se fieldmap option')
+parser.add_argument('-se2', type=str,
+                    help='The se image with the opposite phase encoding direction as se1 for the se fieldmap option')
+parser.add_argument('-pe_dir', type=str,
+                    help='The phase encoding direction (-x,+x,-y,+y,-z,+z)')
+parser.add_argument('-echospacing', type=float,
+                    help='The effective echospacing in seconds (a float). See for a discussion https://lcni.uoregon.edu/kb-articles/kb-0003')
+parser.add_argument('-datain', type=str,
+                    help='File for use with topup containing information on phase encoding direction and the total readout time of se1 on line 1 and se2 on line 2.\n See for a discussion https://lcni.uoregon.edu/kb-articles/kb-0003')                                             
 args = parser.parse_args()
-par_dir= '/storage/group/pul8_collab/read/'
-if len(args.pardir) == 1:
-    par_dir += '00' + args.pardir + '/'
-elif len(args.pardir) == 2:
-    par_dir += '0' + args.pardir + '/'
-else:
-    par_dir += args.pardir + '/'
-fieldmap_dir = par_dir + "Fieldmap/"
-func_data_dir = par_dir + "Func/"
-str_data_dir = par_dir + "Struct/"
+
+if not args.numruns or not args.func or not args.str or not args.mni or not args.mni_brain or not args.mni_mask or not args.fieldmap_type or not args.hp_cutoff or not args.tr or not args.fwhm or not args.outdir:
+    print "-numruns, -func, -str, -mni, -mni_brain, -mni_mask, -fieldmap_type, hp_cutoff, -tr, -fwhm, and -outdir must all be specified. They are not optional"
+    pass 
+
+numruns = args.numruns
+func = [line.rstrip('\n') for line in open(args.func,'r').readlines()]
+struct = args.struct
+mni = args.mni
+mni_brain = args.mni_brain
+mni_mask = args.mni_mask
+fieldmap_type = args.fieldmap_type
+hp_cutoff = args.hp_cutoff
+tr = args.tr
+fwhm = args.fwhm
+outdir = args.outdir
+
+if fieldmap_type == 'gre':
+    if not args.mag:
+        print "You have indicated that you are using a GRE fieldmap, but have not specified the appropriate files. Please specify the magnitude image."
+    if not args.phase:
+        print "You have indicated that you are using a GRE fieldmap, but have not specified the appropriate files. Please specify the phase image."
+    mag = args.mag
+    phase = args.phase
+elif fieldmap_type == 'se':
+    if not args.se1:
+        print "You have indicated that you are using a SE fieldmap, but have not specified the appropriate information. Please specify the se1 image."
+    if not args.se2:
+        print "You have indicated that you are using a SE fieldmap, but have not specified the appropriate information. Please specify the se2 image."
+    if not args.pe_dir:
+        print "You have indicated that you are using a SE fieldmap, but have not specified the appropriate information. Please specify the phase encoding direction."
+    if not args.echospacing:
+        print "You have indicated that you are using a SE fieldmap, but have not specified the appropriate information. Please specify the echospacing."
+    if not args.datain:
+        print "You have indicated that you are using a SE fieldmap, but have not specified the appropriate information. Please specify the datain file."
+    se1 = args.se1
+    se2 = args.se2
+    pe_dir = args.pe_dir
+    echospacing = args.echospacing
+    datain = args.datain
+    
+elif fieldmap_type != 'none':
+    print "You have not correctly specified the fieldmap_type argument. Please enter 'gre', 'se', or 'none'"
 
 ##-----------------------------------------------------------------##
 ##This section defines functions that will be used during prerpocessing but
-## will not act as actual "nodes" in the preprocessing pipeline    
-def filter_design_mat(csts,wmts,td):
-    import os
-    cs = [num.replace(' \n','\t') for num in open(csts,'r').readlines()]
-    wm = [num.replace(' \n','\t') for num in open(wmts,'r').readlines()]
-    td = open(td,'r').readlines()[5:254]
-    design = [cs[i] + wm[i] + td[i] for i in range(249)]
-    
-    file_name = csts.split('/')[len(csts.split('/'))-1].replace('dtype_despike_mcf_masked_flirt_ts.txt','filter_design.mat') 
-    txt = ''
-    for line in design:
-        txt += line
-                
-    with open(file_name,'w') as f:
-        f.write(txt)
-    return os.path.abspath(file_name)
-    
+## will not act as actual "nodes" in the preprocessing pipeline        
 def list_of_lists(in_file):
     return [[item] for item in in_file]
 
@@ -56,108 +106,24 @@ def topup_merge_list(seAP,sePA):
         new = [seAP,sePA]
     return new
     
-def run_merger(in_files):
-    new_list = []
-    for i in range(len(list)):
-        if i%2==0:
-            new_list.append([in_files[i],in_files[i+1]])
-    return new_list
-    
 def choose_wm(fs):
     return [fs[0][2]]
 
 def choose_csf(fs):
     return [fs[0][0]]
     
-def choose_wm5(fs):
-    return [fs[0][2] for i in range(5)]
+def choose_wm_numruns(fs,numruns):
+    return [fs[0][2] for i in range(numruns)]
 
-def choose_csf5(fs):
-    return [fs[0][0] for i in range(5)]
-
-#Create EV file
-def wm_ev(wmts):
-    import os
-    import numpy.random as random
-    import string
-    import exceptions
-    out_base = ''
-    while out_base == '':
-        letters = string.ascii_letters
-        out_base = ''.join(['/tmp/tmp',''.join([letters[i] for i in random.choice(len(letters),10)])])
-        out_base += '/WM_EV/'
-        try:
-            os.makedirs(out_base)
-        except:
-            exceptions.OSError
-            out_base = ''
-    outf = out_base + 'WM.run001.txt'
-    txt = ''
-    secs = 0
-    for val in open(wmts,'r').read().replace(' ','').rstrip('\n').split('\n'):
-        txt += '\t'.join([str(secs),str(0),val.rstrip('n')]) +'\n'
-        secs += 2
-    open(outf,'w').write(txt.rstrip('\n'))
-    return outf
+def choose_csf_numruns(fs,numruns):
+    return [fs[0][0] for i in range(numruns)]
     
-#Create EV file
-def csf_ev(csfts):
-    import os
-    import numpy.random as random
-    import string
-    import exceptions
-    out_base = ''
-    while out_base == '':
-        letters = string.ascii_letters
-        out_base = ''.join(['/tmp/tmp',''.join([letters[i] for i in random.choice(len(letters),10)])])
-        out_base += '/CSF_EV/'
-        try:
-            os.makedirs(out_base)
-        except:
-            exceptions.OSError
-            out_base = ''
-    outf = out_base + 'CSF.run001.txt'
-    txt = ''
-    secs = 0
-    for val in open(csfts,'r').read().replace(' ','').rstrip('\n').split('\n'):
-        txt += '\t'.join([str(secs),str(0),val.rstrip('n')]) +'\n'
-        secs += 2
-    open(outf,'w').write(txt.rstrip('\n'))
-    return outf
-    
-def repfiles(fs):
+def repfiles(fs,numruns):
     new = []
     for f in fs:
-        for i in range(5):
+        for i in range(numruns):
             new.append(f)
     return new
-
-def combine_covariates(mp,csf,wm):
-    import os
-    import numpy.random as random
-    import string
-    import exceptions
-    out_base = ''
-    while out_base == '':
-        letters = string.ascii_letters
-        out_base = ''.join(['/tmp/tmp',''.join([letters[i] for i in random.choice(len(letters),10)])])
-        out_base += '/MP_CSF_WM_Covariates/'
-        try:
-            os.makedirs(out_base)
-        except:
-            exceptions.OSError
-            out_base = ''
-    motion = open(mp,'r').readlines()
-    sf = open(csf,'r').readlines()
-    white = open(wm,'r').readlines()
-    out = ''
-    for i in range(len(motion)):
-        line = motion[i].split() + sf[i].split() + white[i].split()
-        out += '  '.join(line) + '  \n'
-    out.rstrip('\n')
-    covariates = out_base + 'mp_csf_wm_cov' + mp.split('/')[-2][-1] + '.par'
-    open(covariates,'w').write(out)
-    return covariates
 ##----------------------------------------------------------------##
 #This section defines the workflow
 
@@ -165,21 +131,26 @@ def combine_covariates(mp,csf,wm):
 preproc = Workflow(name = "fMRI_Preprocessing")#,base_dir='/media/bschloss/Extra Drive 1/Preprocessing/')
 
 #Use DataGrabber function to get all of the data
-data = Node(ID(fields=['func','struct','mni','mni_brain','mni_mask','mag','phase','seAP','sePA','datain'],
+data = Node(ID(fields=['func','struct','mni','mni_brain','highpass_sigma','fwhm','mni_mask','mag','phase','se1','se2','pe_dir','echospacing','datain'],
                mandatory_inputs=False),name='Data')
-data.inputs.func = [f + '/' + os.listdir(f)[0] for f in [func_data_dir + 'Run' + str(i) for i in range(1,6)]]
-data.inputs.struct = [str_data_dir + f for f in os.listdir(str_data_dir) if 'co' in f and 'warp' not in f]
-data.inputs.mni = '/storage/group/pul8_collab/read/MNI152_T1_3mm3mm4mm.nii.gz'
-data.inputs.mni_brain = '/storage/group/pul8_collab/read/MNI152_T1_3mm3mm4mm_brain.nii.gz'
-data.inputs.mni_mask = '/storage/group/pul8_collab/read/MNI152_T1_3mm3mm4mm_brain_mask.nii.gz'
-data.inputs.mag = [fieldmap_dir + f for f in os.listdir(fieldmap_dir) if '1001.nii.gz' in f]
-data.inputs.phase = [fieldmap_dir + f for f in os.listdir(fieldmap_dir) if '2001.nii.gz' in f]
-data.inputs.seAP = [fieldmap_dir + f for f in os.listdir(fieldmap_dir) if 'AP' in f and 'Grappa' not in f]
-data.inputs.sePA = [fieldmap_dir + f for f in os.listdir(fieldmap_dir) if 'PA' in f and 'Grappa' not in f]
-data.inputs.datain = '/storage/group/pul8_collab/read/datain_fMRI.txt'
+data.inputs.func = [func]
+data.inputs.struct = [struct]
+data.inputs.mni = mni
+data.inputs.mni_brain = mni_brain
+data.inputs.mni_mask = mni_mask
+data.inputs.highpass_sigma = float((hp_cutoff/tr)/2.355)
+data.inputs.fwhm = fwhm
+data.inputs.mag = [mag]
+data.inputs.phase = [phase]
+data.inputs.se1 = [se1]
+data.inputs.se2 = [se2]
+data.inputs.pe_dir = pe_dir
+data.inputs.echospacing = echospacing
+data.inputs.datain = datain
+
 #Use the DataSink function to store all outputs
 datasink = Node(nio.DataSink(), name= 'Output')
-datasink.inputs.base_directory = par_dir + 'fMRI_Preprocessing/'
+datasink.inputs.base_directory = outdir
 
 #Convert input data to float representation
 img2float = MapNode(interface=fsl.ImageMaths(out_data_type='float',
@@ -189,123 +160,111 @@ img2float = MapNode(interface=fsl.ImageMaths(out_data_type='float',
                            name='img2float')
                            
 preproc.connect(data, 'func', img2float, 'in_file')
-'''
-gre_mag_mean = MapNode(interface=fsl.MeanImage(),
-                 name='GRE_Mean_Mag',
-                 iterfield = ['in_file'])
-preproc.connect(data,'mag',gre_mag_mean,'in_file')
-preproc.connect(gre_mag_mean,'out_file',datasink,'GRE_Magnitude_File')
-
-gre_mag_bet = MapNode(fsl.BET(mask=True),
-                     name = 'Brain_Extract_GRE_Mag',
+if fieldmap_type == 'gre':
+    gre_mag_mean = MapNode(interface=fsl.MeanImage(),
+                     name='GRE_Mean_Mag',
                      iterfield = ['in_file'])
-preproc.connect(gre_mag_mean,'out_file',gre_mag_bet,'in_file')
-preproc.connect(gre_mag_bet,'out_file',datasink,'Brain_Extracted_GRE_Mag_No_Erosion')
-
-gre_erode_mask = MapNode(fsl.ErodeImage(),
-                     name = 'Erode_GRE_Mag_Map',
-                     iterfield = ['in_file'])
-preproc.connect(gre_mag_bet,'mask_file',gre_erode_mask,'in_file')
-preproc.connect(gre_erode_mask,'out_file',datasink,'GRE_Mag_Eroded_Mask')
-
-gre_apply_ero = MapNode(fsl.ApplyMask(),
-                    name = "GRE_Apply_Eroded_Brain_Mask",
-                    iterfield = ['in_file','mask_file'])
-preproc.connect(gre_erode_mask,'out_file',gre_apply_ero,'mask_file')
-preproc.connect(gre_mag_mean,'out_file',gre_apply_ero,'in_file')
-preproc.connect(gre_apply_ero,'out_file',datasink,'Brain_Extracted_GRE_Mag_Eroded_Mask')
-
-prepare_fm = MapNode(interface=fsl.epi.PrepareFieldmap(),
-                     name = 'Prepare_Field_Map',
-                     iterfield = ['in_magnitude','in_phase'])
-preproc.connect(gre_apply_ero,'out_file',prepare_fm,'in_magnitude')
-preproc.connect(data,'phase',prepare_fm,'in_phase')
-preproc.connect(prepare_fm,'out_fieldmap',datasink,'GRE_Field_Map')
-
-gre_sig_loss = MapNode(interface=fsl.epi.SigLoss(),
-                       name = 'Estimate_Signal_Loss',
-                       iterfield = ['in_file'])
-preproc.connect(prepare_fm,'out_fieldmap',gre_sig_loss,'in_file')
-preproc.connect(gre_sig_loss,'out_file',datasink,'Estimated_Signal_Loss')
-'''
-AP0 = MapNode(fsl.ExtractROI(t_min=0,t_size=1),
-                  name = 'AP0',
-                  iterfield = ['in_file'])
-preproc.connect(data,'seAP',AP0,'in_file')
-preproc.connect(AP0,'roi_file',datasink,'AP0')
-
-PA0 = MapNode(fsl.ExtractROI(t_min=0,t_size=1),
-                  name = 'PA0',
-                  iterfield = ['in_file'])
-preproc.connect(data,'sePA',PA0,'in_file')
-preproc.connect(PA0,'roi_file',datasink,'PA0')
-
-#Merge B0AP with B0PA in lists
-seAPPA = MapNode(Function(input_names = ['seAP','sePA'],
-                        output_names = ['merged_seappa'],
-                        function = topup_merge_list),
-                 name = 'Topup_Merge_List',
-                 iterfield = ['seAP','sePA'])
-preproc.connect(AP0,'roi_file',seAPPA,'seAP')
-preproc.connect(PA0,'roi_file',seAPPA,'sePA')
-
-#Merge B0AP with B0PA into a single image
-appa_merger = MapNode(interface=fsl.Merge(dimension='t'),
-                          iterfield=['in_files'],
-                          name="APPA_Merger")
-preproc.connect(seAPPA,'merged_seappa',appa_merger,'in_files')
-preproc.connect(appa_merger,'merged_file',datasink,'SE_AP_PA_Merged')
-
-#Run Top UP
-topup = MapNode(fsl.epi.TOPUP(),
-                name = 'TOPUP',
-                iterfield = ['in_file'])
-preproc.connect(data,'datain',topup,'encoding_file')
-preproc.connect(appa_merger,'merged_file',topup,'in_file')
-preproc.connect(topup,'out_enc_file',datasink,'Apply_TOPUP_Encoding_File')
-
-#Convert Fieldmap to radians
-fmap2rads = MapNode(fsl.BinaryMaths(operation='mul',operand_value=2*pi),
-                    name = 'Fieldmap_to_Radians',
+    preproc.connect(data,'mag',gre_mag_mean,'in_file')
+    preproc.connect(gre_mag_mean,'out_file',datasink,'GRE_Magnitude_File')
+    
+    gre_mag_bet = MapNode(fsl.BET(mask=True),
+                         name = 'Brain_Extract_GRE_Mag',
+                         iterfield = ['in_file'])
+    preproc.connect(gre_mag_mean,'out_file',gre_mag_bet,'in_file')
+    preproc.connect(gre_mag_bet,'out_file',datasink,'Brain_Extracted_GRE_Mag_No_Erosion')
+    
+    gre_erode_mask = MapNode(fsl.ErodeImage(),
+                         name = 'Erode_GRE_Mag_Map',
+                         iterfield = ['in_file'])
+    preproc.connect(gre_mag_bet,'mask_file',gre_erode_mask,'in_file')
+    preproc.connect(gre_erode_mask,'out_file',datasink,'GRE_Mag_Eroded_Mask')
+    
+    gre_apply_ero = MapNode(fsl.ApplyMask(),
+                        name = "GRE_Apply_Eroded_Brain_Mask",
+                        iterfield = ['in_file','mask_file'])
+    preproc.connect(gre_erode_mask,'out_file',gre_apply_ero,'mask_file')
+    preproc.connect(gre_mag_mean,'out_file',gre_apply_ero,'in_file')
+    preproc.connect(gre_apply_ero,'out_file',datasink,'Brain_Extracted_GRE_Mag_Eroded_Mask')
+    
+    prepare_fm = MapNode(interface=fsl.epi.PrepareFieldmap(),
+                         name = 'Prepare_Field_Map',
+                         iterfield = ['in_magnitude','in_phase'])
+    preproc.connect(gre_apply_ero,'out_file',prepare_fm,'in_magnitude')
+    preproc.connect(data,'phase',prepare_fm,'in_phase')
+    preproc.connect(prepare_fm,'out_fieldmap',datasink,'GRE_Field_Map')
+    
+    gre_sig_loss = MapNode(interface=fsl.epi.SigLoss(),
+                           name = 'Estimate_Signal_Loss',
+                           iterfield = ['in_file'])
+    preproc.connect(prepare_fm,'out_fieldmap',gre_sig_loss,'in_file')
+    preproc.connect(gre_sig_loss,'out_file',datasink,'Estimated_Signal_Loss')
+    
+elif fieldmap_type == 'se':
+    AP0 = MapNode(fsl.ExtractROI(t_min=0,t_size=1),
+                      name = 'AP0',
+                      iterfield = ['in_file'])
+    preproc.connect(data,'seAP',AP0,'in_file')
+    preproc.connect(AP0,'roi_file',datasink,'AP0')
+    
+    PA0 = MapNode(fsl.ExtractROI(t_min=0,t_size=1),
+                      name = 'PA0',
+                      iterfield = ['in_file'])
+    preproc.connect(data,'sePA',PA0,'in_file')
+    preproc.connect(PA0,'roi_file',datasink,'PA0')
+    
+    #Merge B0AP with B0PA in lists
+    seAPPA = MapNode(Function(input_names = ['seAP','sePA'],
+                            output_names = ['merged_seappa'],
+                            function = topup_merge_list),
+                     name = 'Topup_Merge_List',
+                     iterfield = ['seAP','sePA'])
+    preproc.connect(AP0,'roi_file',seAPPA,'seAP')
+    preproc.connect(PA0,'roi_file',seAPPA,'sePA')
+    
+    #Merge B0AP with B0PA into a single image
+    appa_merger = MapNode(interface=fsl.Merge(dimension='t'),
+                              iterfield=['in_files'],
+                              name="APPA_Merger")
+    preproc.connect(seAPPA,'merged_seappa',appa_merger,'in_files')
+    preproc.connect(appa_merger,'merged_file',datasink,'SE_AP_PA_Merged')
+    
+    #Run Top UP
+    topup = MapNode(fsl.epi.TOPUP(),
+                    name = 'TOPUP',
                     iterfield = ['in_file'])
-preproc.connect(topup,'out_field',fmap2rads,'in_file')
-preproc.connect(fmap2rads,'out_file',datasink,'Fieldmap_Radians')
-
-#Estimate signal loss
-se_sig_loss = MapNode(interface=fsl.epi.SigLoss(echo_time = .0512,
-                                                slice_direction = 'z'),
-                       name = 'Estimate_Signal_Loss',
-                       iterfield = ['in_file'])
-preproc.connect(fmap2rads,'out_file',se_sig_loss,'in_file')
-preproc.connect(se_sig_loss,'out_file',datasink,'Estimated_Signal_Loss')
-
-#Average Magnitude
-se_mag_mean = MapNode(fsl.MeanImage(),
-                  name = 'Magnitude_Image',
-                  iterfield = ['in_file'])
-preproc.connect(topup,'out_corrected',se_mag_mean,'in_file')
-preproc.connect(se_mag_mean,'out_file',datasink,'Magnitude_Image')
-
-#Brain Extrac Magnitude Image
-se_mag_bet = MapNode(fsl.BET(robust=True,mask=True),
-                  name = 'BET_Magnitude',
-                  iterfield = ['in_file'])
-preproc.connect(se_mag_mean,'out_file',se_mag_bet,'in_file')
-preproc.connect(se_mag_bet,'out_file',datasink,'Brain_Extracted_SE_Mag')
-'''
-se_erode_mask = MapNode(fsl.ErodeImage(),
-                     name = 'Erode_SE_Mag_Map',
-                     iterfield = ['in_file'])
-preproc.connect(se_mag_bet,'mask_file',se_erode_mask,'in_file')
-preproc.connect(se_erode_mask,'out_file',datasink,'SE_Mag_Eroded_Mask')
-
-se_apply_ero = MapNode(fsl.ApplyMask(),
-                    name = "SE_Apply_Eroded_Brain_Mask",
-                    iterfield = ['in_file','mask_file'])
-preproc.connect(se_erode_mask,'out_file',se_apply_ero,'mask_file')
-preproc.connect(se_mag_mean,'out_file',se_apply_ero,'in_file')
-preproc.connect(se_apply_ero,'out_file',datasink,'Brain_Extracted_SE_Mag_Eroded_Mask')
-'''
+    preproc.connect(data,'datain',topup,'encoding_file')
+    preproc.connect(appa_merger,'merged_file',topup,'in_file')
+    preproc.connect(topup,'out_enc_file',datasink,'Apply_TOPUP_Encoding_File')
+    
+    #Convert Fieldmap to radians
+    fmap2rads = MapNode(fsl.BinaryMaths(operation='mul',operand_value=2*pi),
+                        name = 'Fieldmap_to_Radians',
+                        iterfield = ['in_file'])
+    preproc.connect(topup,'out_field',fmap2rads,'in_file')
+    preproc.connect(fmap2rads,'out_file',datasink,'Fieldmap_Radians')
+    
+    #Estimate signal loss
+    se_sig_loss = MapNode(interface=fsl.epi.SigLoss(echo_time = .0512,
+                                                    slice_direction = 'z'),
+                           name = 'Estimate_Signal_Loss',
+                           iterfield = ['in_file'])
+    preproc.connect(fmap2rads,'out_file',se_sig_loss,'in_file')
+    preproc.connect(se_sig_loss,'out_file',datasink,'Estimated_Signal_Loss')
+    
+    #Average Magnitude
+    se_mag_mean = MapNode(fsl.MeanImage(),
+                      name = 'Magnitude_Image',
+                      iterfield = ['in_file'])
+    preproc.connect(topup,'out_corrected',se_mag_mean,'in_file')
+    preproc.connect(se_mag_mean,'out_file',datasink,'Magnitude_Image')
+    
+    #Brain Extrac Magnitude Image
+    se_mag_bet = MapNode(fsl.BET(robust=True,mask=True),
+                      name = 'BET_Magnitude',
+                      iterfield = ['in_file'])
+    preproc.connect(se_mag_mean,'out_file',se_mag_bet,'in_file')
+    preproc.connect(se_mag_bet,'out_file',datasink,'Brain_Extracted_SE_Mag')
+    
 #Brain Extract structural images
 bet = MapNode(fsl.BET(robust=True),name='Brain_Extractor',iterfield=['in_file'])
 preproc.connect(data,'struct',bet,'in_file')
@@ -355,59 +314,83 @@ preproc.connect(mean_strip,'mask_file',functional_brain_mask,'mask_file')
 preproc.connect(motion_correct,'out_file',functional_brain_mask,'in_file')
 preproc.connect(functional_brain_mask,'out_file', datasink, 'Skull_Stripped_Func')
 
-#Coregister the mean functional data image to the respective structural image
-register_f2s = MapNode(fsl.EpiReg(pedir='-y',echospacing = .00058),
-                       name='Register_F2S',
-                       iterfield=['epi','t1_brain','t1_head','fmap','fmapmag','fmapmagbrain','wmseg'])
-preproc.connect(functional_brain_mask,'out_file',register_f2s,'epi')
-preproc.connect(bet,('out_file',repfiles),register_f2s,'t1_brain')
-preproc.connect(data,('struct',repfiles),register_f2s,'t1_head')
-preproc.connect(fmap2rads,('out_file',repfiles),register_f2s,'fmap')
-preproc.connect(se_mag_mean,('out_file',repfiles),register_f2s,'fmapmag')
-preproc.connect(se_mag_bet,('out_file',repfiles),register_f2s,'fmapmagbrain')
-preproc.connect(fast,('tissue_class_files',choose_wm5),register_f2s,'wmseg')
-preproc.connect(register_f2s,'epi2str_mat',datasink,'F2S_Affine')
-preproc.connect(register_f2s,'out_file',datasink,'Coregistered_F2S')
-preproc.connect(register_f2s,'wmedge',datasink,'WM_Edges')
-preproc.connect(register_f2s,'shiftmap',datasink,'Shift_Map')
+if fieldmap_type == 'se':
+    #Coregister the mean functional data image to the respective structural image
+    register_f2s = MapNode(fsl.EpiReg(),
+                           name='Register_F2S',
+                           iterfield=['epi','t1_brain','t1_head','fmap','fmapmag','fmapmagbrain','wmseg'])
+    preproc.connect(data,'pe_dir',register_f2s,'pedir')
+    preproc.connect(data,'echospacing',register_f2s,'echospacing')
+    preproc.connect(functional_brain_mask,'out_file',register_f2s,'epi')
+    preproc.connect(bet,('out_file',repfiles),register_f2s,'t1_brain')
+    preproc.connect(data,('struct',repfiles),register_f2s,'t1_head')
+    preproc.connect(fmap2rads,('out_file',repfiles),register_f2s,'fmap')
+    preproc.connect(se_mag_mean,('out_file',repfiles),register_f2s,'fmapmag')
+    preproc.connect(se_mag_bet,('out_file',repfiles),register_f2s,'fmapmagbrain')
+    preproc.connect(fast,('tissue_class_files',choose_wm_numruns),register_f2s,'wmseg')
+    preproc.connect(register_f2s,'epi2str_mat',datasink,'F2S_Affine')
+    preproc.connect(register_f2s,'out_file',datasink,'Coregistered_F2S')
+    preproc.connect(register_f2s,'wmedge',datasink,'WM_Edges')
+    preproc.connect(register_f2s,'shiftmap',datasink,'Shift_Map')
 
+elif fieldmap_type == 'gre':
+    #Coregister the mean functional data image to the respective structural image
+    register_f2s = MapNode(fsl.EpiReg(),
+                           name='Register_F2S',
+                           iterfield=['epi','t1_brain','t1_head','fmap','fmapmag','fmapmagbrain','wmseg'])
+    preproc.connect(functional_brain_mask,'out_file',register_f2s,'epi')
+    preproc.connect(bet,('out_file',repfiles),register_f2s,'t1_brain')
+    preproc.connect(data,('struct',repfiles),register_f2s,'t1_head')
+    preproc.connect(prepare_fm,('out_fieldmap',repfiles),register_f2s,'fmap')
+    preproc.connect(gre_mag_mean,('out_file',repfiles),register_f2s,'fmapmag')
+    preproc.connect(gre_mag_bet,('out_file',repfiles),register_f2s,'fmapmagbrain')
+    preproc.connect(fast,('tissue_class_files',choose_wm_numruns),register_f2s,'wmseg')
+    preproc.connect(register_f2s,'epi2str_mat',datasink,'F2S_Affine')
+    preproc.connect(register_f2s,'out_file',datasink,'Coregistered_F2S')
+    preproc.connect(register_f2s,'wmedge',datasink,'WM_Edges')
+    preproc.connect(register_f2s,'shiftmap',datasink,'Shift_Map')
+
+else:
+    #Coregister the mean functional data image to the respective structural image
+    register_f2s = MapNode(fsl.EpiReg(),
+                           name='Register_F2S',
+                           iterfield=['epi','t1_brain','t1_head','wmseg'])
+    preproc.connect(functional_brain_mask,'out_file',register_f2s,'epi')
+    preproc.connect(bet,('out_file',repfiles),register_f2s,'t1_brain')
+    preproc.connect(data,('struct',repfiles),register_f2s,'t1_head')
+    preproc.connect(fast,('tissue_class_files',choose_wm_numruns),register_f2s,'wmseg')
+    preproc.connect(register_f2s,'epi2str_mat',datasink,'F2S_Affine')
+    preproc.connect(register_f2s,'out_file',datasink,'Coregistered_F2S')
+    preproc.connect(register_f2s,'wmedge',datasink,'WM_Edges')
+    
+    
 #Get average time series of whitematter masked file
 avg_wmts = MapNode(fsl.ImageMeants(),name='WM_Time_Series_Averager',
                 iterfield=['in_file','mask'])
 preproc.connect(register_f2s,'out_file',avg_wmts,'in_file')
-preproc.connect(fast,('tissue_class_files',choose_wm5),avg_wmts,'mask')
+preproc.connect(fast,('tissue_class_files',choose_wm_numruns),avg_wmts,'mask')
 preproc.connect(avg_wmts,'out_file',datasink,'WM_TS')
 
 #Get average time series of cerebral spinal fluid file
 avg_csfts = MapNode(fsl.ImageMeants(),name='CSF_Time_Series_Averager',
                 iterfield=['in_file','mask'])
 preproc.connect(register_f2s,'out_file',avg_csfts,'in_file')
-preproc.connect(fast,('tissue_class_files',choose_csf5),avg_csfts,'mask')
+preproc.connect(fast,('tissue_class_files',choose_csf_numruns),avg_csfts,'mask')
 preproc.connect(avg_csfts,'out_file',datasink,'CSF_TS')
 
 eig_wmts = MapNode(fsl.ImageMeants(eig=True,order=3),
 		   name='WM_Time_Series_Eigenvariates',
 		   iterfield=['in_file','mask'])
 preproc.connect(register_f2s,'out_file',eig_wmts,'in_file')
-preproc.connect(fast,('tissue_class_files',choose_wm5),eig_wmts,'mask')
+preproc.connect(fast,('tissue_class_files',choose_wm_numruns),eig_wmts,'mask')
 preproc.connect(eig_wmts,'out_file',datasink,'WM_Eig')
 
 eig_csfts = MapNode(fsl.ImageMeants(eig=True,order=3),
                    name='CSF_Time_Series_Eigenvariates',
                    iterfield=['in_file','mask'])
 preproc.connect(register_f2s,'out_file',eig_csfts,'in_file')
-preproc.connect(fast,('tissue_class_files',choose_csf5),eig_csfts,'mask')
+preproc.connect(fast,('tissue_class_files',choose_csf_numruns),eig_csfts,'mask')
 preproc.connect(eig_csfts,'out_file',datasink,'CSF_Eig')
-
-combine_covariates = MapNode(Function(input_names = ['mp','csf','wm'],
-                        output_names = ['covariates'],
-                        function = combine_covariates),
-                name = 'Combine_Covariates',
-                iterfield=['mp','csf','wm'])
-preproc.connect(motion_correct,'par_file',combine_covariates,'mp')
-preproc.connect(eig_csfts,'out_file',combine_covariates,'csf')
-preproc.connect(eig_wmts,'out_file',combine_covariates,'wm')
-preproc.connect(combine_covariates,'covariates',datasink,'Motion_CSF_WM_Covariates')
 
 #Now we register the functional data to MNI space
 #Register the structural data to MNI using FLIRT
@@ -441,15 +424,25 @@ preproc.connect(register_s2MNI_NL,'warped_file',datasink,'Registered_s2MNI_NL_Wa
 
 #Concatenate the shiftmap, functional to structural affine, and stuctural to mni warp
 #into a single transform.
-convert_warp = MapNode(fsl.ConvertWarp(relwarp = True, shift_direction='y-'),
-                       name='Concat_Shift_Affine_and_Warp',
-                       iterfield = ['shift_in_file','premat','warp1'])
-preproc.connect(register_f2s,'shiftmap',convert_warp,'shift_in_file')
-preproc.connect(register_f2s,'epi2str_mat',convert_warp,'premat')
-preproc.connect(register_s2MNI_NL,('field_file',repfiles),convert_warp,'warp1')
-preproc.connect(data,'mni',convert_warp,'reference')
-preproc.connect(convert_warp,'out_file',datasink,'Warp_File_F2MNI') 
-
+if fieldmap_type == 'gre' or fieldmap_type == 'se':
+    convert_warp = MapNode(fsl.ConvertWarp(relwarp = True, shift_direction='y-'),
+                           name='Concat_Shift_Affine_and_Warp',
+                           iterfield = ['shift_in_file','premat','warp1'])
+    preproc.connect(register_f2s,'shiftmap',convert_warp,'shift_in_file')
+    preproc.connect(register_f2s,'epi2str_mat',convert_warp,'premat')
+    preproc.connect(register_s2MNI_NL,('field_file',repfiles),convert_warp,'warp1')
+    preproc.connect(data,'mni',convert_warp,'reference')
+    preproc.connect(convert_warp,'out_file',datasink,'Warp_File_F2MNI') 
+    
+else:
+    convert_warp = MapNode(fsl.ConvertWarp(relwarp = True, shift_direction='y-'),
+                           name='Concat_Shift_Affine_and_Warp',
+                           iterfield = ['premat','warp1'])
+    preproc.connect(register_f2s,'epi2str_mat',convert_warp,'premat')
+    preproc.connect(register_s2MNI_NL,('field_file',repfiles),convert_warp,'warp1')
+    preproc.connect(data,'mni',convert_warp,'reference')
+    preproc.connect(convert_warp,'out_file',datasink,'Warp_File_F2MNI') 
+    
 #Apply warp to functional data that has been registered to structural image
 #converting it to MNI space using Nonlinear registartion
 apply_warp = MapNode(fsl.ApplyWarp(),name='Warper_F2MNI',
@@ -459,25 +452,18 @@ preproc.connect(convert_warp,'out_file',apply_warp,'field_file')
 preproc.connect(data,'mni_mask',apply_warp,'mask_file')
 preproc.connect(motion_correct,'out_file',apply_warp,'in_file')
 preproc.connect(apply_warp,'out_file',datasink,'Registered_F2MNI_NL_Warped')
-
+    
 #Get mean-image in time direction           
 meants = MapNode(fsl.MeanImage(),
                 name= 'Mean_Func',
                 iterfield=['in_file'])
 preproc.connect(apply_warp,'out_file',meants,'in_file')
 
-#Regress out task regressors and WM and CS regressors
-filter_regressor = MapNode(fsl.FilterRegressor(filter_all=True),
-                           name="Filter_Regressor",
-                           iterfield=['design_file','in_file'])
-preproc.connect(apply_warp,'out_file',filter_regressor,'in_file')
-preproc.connect(combine_covariates,'covariates',filter_regressor,'design_file')
-preproc.connect(filter_regressor,'out_file',datasink,'Filtered')
-
 #Highpass filter the data (which removes the mean)
-highpass = MapNode(fsl.TemporalFilter(highpass_sigma = float((128.0/.400)/2.355)),
+highpass = MapNode(fsl.TemporalFilter(),
                    name = 'HighPass_Filter',
                    iterfield = ['in_file']) 
+preproc.connect(data,'highpass_sigma',highpass,'highpass_sigma')
 preproc.connect(apply_warp,'out_file',highpass,'in_file')
 
 #Add the mean back in
@@ -489,34 +475,12 @@ preproc.connect(meants,'out_file',add_mean_back_in,'operand_file')
 preproc.connect(add_mean_back_in,'out_file',datasink,'Highpass')
 
 #Smooth the data                 
-smoother = MapNode(interface=fsl.IsotropicSmooth(fwhm=8),
+smoother = MapNode(interface=fsl.IsotropicSmooth(),
                       name='Smoother',
                       iterfield=['in_file'])
 preproc.connect(add_mean_back_in, 'out_file', smoother, 'in_file')
+preproc.connect(data,'fwhm',smoother,'fwhm')
 preproc.connect(smoother, 'out_file', datasink, 'Smoothed')
 
-#Highpass filter the data (which removes the mean)
-highpass_filtered = MapNode(fsl.TemporalFilter(highpass_sigma = float((128.0/.400)/2.355)),
-                   name = 'HighPass_Filter_Filtered',
-                   iterfield = ['in_file']) 
-preproc.connect(filter_regressor,'out_file',highpass_filtered,'in_file')
-
-#Add the mean back in
-add_mean_back_in_filtered = MapNode(fsl.BinaryMaths(operation='add'),
-                   name = 'Add_Mean_Back_In_Filtered',
-                   iterfield = ['in_file','operand_file'])
-preproc.connect(highpass_filtered,'out_file',add_mean_back_in_filtered,'in_file')
-preproc.connect(meants,'out_file',add_mean_back_in_filtered,'operand_file')
-preproc.connect(add_mean_back_in_filtered,'out_file',datasink,'Highpass_Filtered')
-
-#Smooth the data                 
-smoother_filtered = MapNode(interface=fsl.IsotropicSmooth(fwhm=8),
-                      name='Smoother_Filtered',
-                      iterfield=['in_file'])
-preproc.connect(add_mean_back_in_filtered, 'out_file', smoother_filtered, 'in_file')
-preproc.connect(smoother_filtered, 'out_file', datasink, 'Smoothed_Filtered')
-
-#preproc.write_graph(dotfilename='fMRI_Preprocessing_Graph.dot',format='svg')
-#preproc.write_graph(dotfilename='fMRI_Preprocessing_Graph.dot',format='svg',graph2use='exec')
-preproc.run(plugin='MultiProc', plugin_args={'n_procs' : 5})
-
+preproc.write_graph(dotfilename='fMRI_Preprocessing_Graph.dot',format='svg',graph2use='exec')
+preproc.run(plugin='MultiProc', plugin_args={'n_procs' : numruns})
