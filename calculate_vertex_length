@@ -1,0 +1,31 @@
+#!/bin/bash
+cd /gpfs/group/pul8/default/read
+for PAR in `ls | grep 0` 214 122 132
+do
+	if [ $PAR != 140 ]
+	then
+		echo $PAR
+		cd $PAR/fMRI_Analyses/Low_Level_Quad
+		mkdir Length_Vertex
+		for RUN in 0 1 2 3 4
+		do
+			#echo ${RUN}_${PAR}
+			if [ ${RUN}_${PAR} != 4_021 ]
+			then	
+				mkdir Length_Vertex/_Parametric_Fit_Model${RUN}
+				fslmaths Parametric_Param_Estimates/_Parametric_Fit_Model${RUN}/pe4.nii.gz -mul -1 negb
+				fslmaths Parametric_Param_Estimates/_Parametric_Fit_Model${RUN}/pe5.nii.gz -mul 2 twoa
+				fslmaths negb -div twoa Length_Vertex/_Parametric_Fit_Model${RUN}/vertex_x_val
+				cd Length_Vertex/_Parametric_Fit_Model${RUN}
+				fslmaths vertex_x_val -mas /gpfs/group/pul8/default/read/Motor_Network_Masks/DCN_6mm_sphere vertex_x_val_DCN
+				fslmaths vertex_x_val -mas /gpfs/group/pul8/default/read/Motor_Network_Masks/lCC_6mm_sphere vertex_x_val_lCC
+				fslmaths vertex_x_val -mas /gpfs/group/pul8/default/read/Motor_Network_Masks/lFEF_6mm_sphere vertex_x_val_lFEF
+				fslmaths vertex_x_val -mas /gpfs/group/pul8/default/read/Motor_Network_Masks/mFEF_6mm_sphere vertex_x_val_mFEF
+				fslmaths vertex_x_val -mas /gpfs/group/pul8/default/read/Motor_Network_Masks/pons_6mm_sphere vertex_x_val_pons
+				cd ../..
+				rm negb.nii.gz twoa.nii.gz
+			fi
+		done
+		cd /gpfs/group/pul8/default/read
+	fi
+done

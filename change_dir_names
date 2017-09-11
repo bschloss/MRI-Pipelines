@@ -1,0 +1,31 @@
+#!/bin/bash
+
+for WORD in Axial Battery Boiler Building Canyon Cheese Circle Circuit Coast Combination Current Distance Dust Earth Electric Electron Engineer Gps Gravity Ground Hull Human Instrument Item Lightbulb Live Location Loop Mars Number Ocean Oil Orbit Order Pasta Path Pepperoni Permutation Piece Pizza Plant Propeller Radio Receiver Rice Rover Safety Satellite Sausage Scientist Select Set Ship Shore Signal Source Space Spacecraft Spill Station Storm Sun Temperature Tilt Time Wave Wire World
+do
+	cd $WORD/What_Path_Masked_Copes
+	mv *L_Angular_Gyrus* L_Angular_Gyrus
+	mv *L_Brocas_Area* L_Brocas_Area
+	mv *L_Inferior_Temporal_Gyrus* L_Inferior_Temporal_Gyrus
+	mv *L_Lateral_Occipital_Cortex* L_Lateral_Occipital_Cortex
+	mv *L_Middle_Temporal_Gyrus* L_Middle_Temporal_Gyrus
+	mv *L_Precuneous_and_L_Posterior_Cingulate* L_Precuneous_and_L_Posterior_Cingulate
+	mv *L_Primary_Motor_Cortex* L_Primary_Motor_Cortex
+	mv *L_Superior_Frontal_Gyrus* L_Superior_Frontal_Gyrus
+	mv *L_Superior_Temporal_Gyrus* L_Superior_Temporal_Gyrus
+	mv *L_Supramarginal_Gyrus* L_Supramarginal_Gyrus
+	mv *L_Temporal_Fusiform_Cortex* L_Temporal_Fusiform_Cortex
+	mv *L_Visual_Cortex* L_Visual_Cortex
+	
+	
+	cd ../ELN_Masked_Copes
+	mv *LIFG* LIFG
+	mv *LMTG* LMTG
+	mv *LSTG* LSTG
+	mv *LTP* LTP
+	mv *RIFG* RIFG
+	mv *RMTG* RMTG
+	mv *RSTG* RSTG
+	mv *RTP* RTP
+	
+	cd ../..
+done

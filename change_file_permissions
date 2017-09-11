@@ -1,0 +1,28 @@
+#!/bin/sh
+LABDIR=/gpfs/group/pul8/default
+cd $LABDIR/read
+DIR=$1
+echo $DIR
+chmod -R 770 $DIR
+cd $DIR
+find . -type d -exec chmod 750 {} +
+find . -type f -exec chmod 640 {} +
+cd DTI
+find . -type f -exec chmod 440 {} +
+cd ../Rest
+find . -type f -exec chmod 440 {} +
+cd ../Func
+find . -type f -exec chmod 440 {} +
+cd ../Struct
+find . -type f -exec chmod 440 {} +
+cd ../Physio
+find . -type f -exec chmod 440 {} +
+cd ../Raw
+find . -type f -exec chmod 440 {} +
+cd $LABDIR/$DIR/E-Prime/Extra
+find . -type f -exec chmod 440 {} +
+cd $LABDIR/$DIR/EDF/Extra
+find . -type f -exec chmod 440 {} +
+cd $LABDIR/read
+chmod 750 $DIR
+chown -R :pul8_collab $DIR

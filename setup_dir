@@ -1,0 +1,51 @@
+#!/bin/bash
+
+LABDIR=/gpfs/group/pul8/default
+PARDIR=$LABDIR/read/$1
+cd ${PARDIR}
+RAW=`ls`
+mkdir DTI EDF E-Prime EV Fieldmap Func Localizer Physio Rest Struct fMRI_Analyses EV2 EV3
+cd $RAW
+dcm2nii *
+mv */*.nii.gz ../
+mv */*.bvec ../
+mv */*.bval ../
+cd ..
+mv *mprnssag* Struct/
+mv *Run* Func/
+mv *ddiff* DTI/
+mv *localizer* Localizer/
+mv *rest* Rest/
+mv *SpinEcho* Fieldmap/
+mkdir EDF/Run1 EDF/Run2 EDF/Run3 EDF/Run4 EDF/Run5 EDF/Extra
+mkdir E-Prime/Run1 E-Prime/Run2 E-Prime/Run3 E-Prime/Run4 E-Prime/Run5 E-Prime/Extra
+mkdir EV/Run1 EV/Run2 EV/Run3 EV/Run4 EV/Run5
+mkdir EV2/Run1 EV2/Run2 EV2/Run3 EV2/Run4 EV2/Run5
+mkdir EV3/Run1 EV3/Run2 EV3/Run3 EV3/Run4 EV3/Run5
+cd Func
+mkdir Refs
+for FILE in `find . -size -100000k | grep .nii.gz`
+do
+	mv $FILE Refs/
+done
+
+mkdir Run1 Run2 Run3 Run4 Run5
+
+for FILE in `ls | grep .nii.gz`
+do
+	if [[ $FILE == *"Run1"* ]]; then 
+		mv $FILE Run1/
+	elif [[ $FILE == *"Run2"* ]]; then 
+                mv $FILE Run2/
+	elif [[ $FILE == *"Run3"* ]]; then 
+                mv $FILE Run3/
+	elif [[ $FILE == *"Run4"* ]]; then 
+                mv $FILE Run4/
+	elif [[ $FILE == *"Run5"* ]]; then 
+                mv $FILE Run5/
+        fi
+done
+cd ${PARDIR}
+mv $RAW Raw
+cd $LABDIR/read/Scripts
+./change_file_permissions $1
